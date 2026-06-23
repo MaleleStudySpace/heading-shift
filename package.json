@@ -1,0 +1,20 @@
+{
+	"name": "heading-shift",
+	"version": "1.0.0",
+	"description": "Promote or demote heading levels together with all sub-headings at once, like Typora.",
+	"main": "main.js",
+	"scripts": {
+		"build": "node main.js"
+	},
+	"keywords": [
+		"obsidian",
+		"heading",
+		"markdown"
+	],
+	"author": "malele",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/MaleleStudyHome/heading-shift"
+	}
+}

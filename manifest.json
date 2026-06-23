@@ -1,0 +1,10 @@
+{
+	"id": "heading-shift",
+	"name": "Heading Shift",
+	"version": "1.0.0",
+	"minAppVersion": "1.4.0",
+	"description": "Promote or demote heading levels together with all sub-headings at once, like Typora.",
+	"author": "malele",
+	"authorUrl": "https://github.com/MaleleStudyHome",
+	"isDesktopOnly": false
+}
