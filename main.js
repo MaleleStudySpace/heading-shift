@@ -10,8 +10,9 @@
  *   3. 对子树范围内每一个标题行同步做 ±1 级别调整：
  *        - promote(提升)：级别 -1（# 越少级别越高）。已经是 H1 → 再提升则变成普通段落。
  *        - demote(降低)：级别 + 1。已经是 H6 → 再降低则保持 H6，避免越界。
- *   4. 跳过代码块（``` / ~~~ 包裹）内部的 # 行，避免误伤代码注释。
- *   5. **仅当光标精确位于标题行上才生效** — 光标在普通文本行上时不做任何操作。
+ *   4. 跳过代码块内部的 # 行，避免误伤代码注释。
+ *      围栏检测遵循 CommonMark：允许 0-3 空格缩进，闭合围栏无信息字符串（语言标签）。
+ *   5. 仅当光标精确位于标题行上才生效。
  *
  * 命令 / 快捷键：
  *   - Promote：Ctrl+Shift+=  (即 Ctrl+Shift++)
@@ -26,6 +27,10 @@ const HEADING_RE = /^( {0,3})(#{1,6})([ \t].*|$)/;
 
 /**
  * 扫描全文，返回所有标题的位置信息。
+ * 代码块围栏检测遵循 CommonMark 规范：
+ * - 围栏行允许前导 0~3 个空格
+ * - 闭合围栏必须没有信息字符串（语言标签）
+ * - 闭合围栏的 ``` `` ``` 数量 >= 起始围栏
  * @param {string} text 全文
  * @returns {{ headings: {line:number, level:number, hashStart:number}[] }}
  */
@@ -34,23 +39,32 @@ function scan(text) {
 	const headings = [];
 	let inFence = false;
 	let fenceChar = "";
+	let fenceLen = 0;
 
 	for (let i = 0; i < lines.length; i++) {
 		const raw = lines[i];
-		const trimmed = raw.trimStart();
 
-		// 代码块围栏判定：``` 或 ~~~（>=3 个相同字符，允许尾部空格）
-		const fenceMatch = trimmed.match(/^(`{3,}|~{3,})/);
+		// 围栏检测：``` 或 ~~~，前导最多 3 空格（CommonMark）
+		// 注意：不能用 trimStart()，tab 和多余空格不匹配，避免误判
+		const fenceMatch = raw.match(/^[ ]{0,3}(`{3,}|~{3,})(.*)/);
 		if (fenceMatch) {
-			const fc = fenceMatch[1][0];
+			const fc = fenceMatch[1];
+			const fl = fc.length;
+			const fcChar = fc[0];
+			const infoStr = fenceMatch[2];
+
 			if (!inFence) {
+				// 起始围栏
 				inFence = true;
-				fenceChar = fc;
-			} else if (fc === fenceChar) {
+				fenceChar = fcChar;
+				fenceLen = fl;
+			} else if (fcChar === fenceChar && fl >= fenceLen && infoStr.trim() === "") {
+				// 闭合围栏：相同字符、长度 >= 起始、无信息字符串（语言标签）
 				inFence = false;
 				fenceChar = "";
+				fenceLen = 0;
 			}
-			// 围栏行本身算作「代码块上下文」，内部不解析标题
+			// 围栏行本身跳过标题检测
 			continue;
 		}
 
@@ -63,7 +77,7 @@ function scan(text) {
 			headings.push({
 				line: i,
 				level: m[2].length,
-				hashStart: m[1].length, // 行内 # 的起始列（用于精确替换）
+				hashStart: m[1].length,
 			});
 		}
 	}
@@ -73,9 +87,7 @@ function scan(text) {
 
 /**
  * 找到光标所在标题。
- * 规则：只有光标精确地位于某标题行上，才返回该标题。
- *       不包含回退逻辑——光标在普通文本行时应什么都不做。
- * @returns {{index:number}|null} 在 headings 数组中的下标，null 表示光标不在标题行上。
+ * 仅当光标精确地位于某标题行上时返回该标题，否则不操作。
  */
 function findCurrentHeading(headings, cursorLine) {
 	for (let i = 0; i < headings.length; i++) {
@@ -152,7 +164,7 @@ function runShift(editor, action) {
 
 	if (changes.length === 0) return;
 
-	// 同时保留滚动位置（不设置光标位置，让 CM 自然地映射光标到新位置）
+	// 保留滚动位置（不设置光标位置，让 CM 自然映射光标到新位置）
 	const savedScroll = editor.getScrollInfo();
 	editor.transaction({ changes });
 	editor.scrollTo(savedScroll.left, savedScroll.top);
