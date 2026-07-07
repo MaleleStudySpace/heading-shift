@@ -11,6 +11,7 @@
  *        - promote(提升)：级别 -1（# 越少级别越高）。已经是 H1 → 再提升则变成普通段落。
  *        - demote(降低)：级别 + 1。已经是 H6 → 再降低则保持 H6，避免越界。
  *   4. 跳过代码块（``` / ~~~ 包裹）内部的 # 行，避免误伤代码注释。
+ *   5. **仅当光标精确位于标题行上才生效** — 光标在普通文本行上时不做任何操作。
  *
  * 命令 / 快捷键：
  *   - Promote：Ctrl+Shift+=  (即 Ctrl+Shift++)
@@ -71,26 +72,18 @@ function scan(text) {
 }
 
 /**
- * 找到光标所在标题。若光标不在任何标题行上，回退到「当前行上方最近的标题」。
- * @returns {{index:number}|null} 在 headings 数组中的下标，null 表示没有标题可用。
+ * 找到光标所在标题。
+ * 规则：只有光标精确地位于某标题行上，才返回该标题。
+ *       不包含回退逻辑——光标在普通文本行时应什么都不做。
+ * @returns {{index:number}|null} 在 headings 数组中的下标，null 表示光标不在标题行上。
  */
 function findCurrentHeading(headings, cursorLine) {
-	let exact = -1;
 	for (let i = 0; i < headings.length; i++) {
 		if (headings[i].line === cursorLine) {
-			exact = i;
-			break;
+			return { index: i };
 		}
 	}
-	if (exact >= 0) return { index: exact };
-
-	// 回退：找最后一个 line <= cursorLine 的标题
-	let candidate = -1;
-	for (let i = 0; i < headings.length; i++) {
-		if (headings[i].line <= cursorLine) candidate = i;
-		else break;
-	}
-	return candidate >= 0 ? { index: candidate } : null;
+	return null;
 }
 
 /**
