@@ -20,14 +20,11 @@
 
 const { Plugin, MarkdownView } = require("obsidian");
 
-/** 正则：匹配一行 ATX 标题，捕获前导空白和 # 数量。
- *  前导空白支持空格和 tab（匹配任意数量，与 Obsidian 实际渲染一致）。
- *  #只能 1~6 个，其后至少跟一个空格/tab 或直接行尾，避免 7+ 个 # 误匹配。
- *  注意：不能在 scan() 中替换 tab → 空格，否则 hashStart 偏移量会与原始行不匹配。 */
-const HEADING_RE = /^([ \t]*)(#{1,6})([ \t].*|$)/;
+/** 正则：匹配一行 ATX 标题，捕获前导 # 数量。允许 1~6 个 #，# 后不限定必须空格。 */
+const HEADING_RE = /^( {0,3})(#{1,6})([ \t].*|$)/;
 
 /**
- * 扫描全文，返回所有标题与代码块围栏的位置信息。
+ * 扫描全文，返回所有标题的位置信息。
  * @param {string} text 全文
  * @returns {{ headings: {line:number, level:number, hashStart:number}[] }}
  */
@@ -39,10 +36,10 @@ function scan(text) {
 
 	for (let i = 0; i < lines.length; i++) {
 		const raw = lines[i];
+		const trimmed = raw.trimStart();
 
 		// 代码块围栏判定：``` 或 ~~~（>=3 个相同字符，允许尾部空格）
-		// 直接对原始行 trimStart，不替换 tab，避免影响后续缩进感知
-		const fenceMatch = raw.trimStart().match(/^(`{3,}|~{3,})/);
+		const fenceMatch = trimmed.match(/^(`{3,}|~{3,})/);
 		if (fenceMatch) {
 			const fc = fenceMatch[1][0];
 			if (!inFence) {
@@ -60,7 +57,6 @@ function scan(text) {
 			continue;
 		}
 
-		// 直接对原始行匹配标题，保证 hashStart 与原始行字符偏移一致
 		const m = raw.match(HEADING_RE);
 		if (m) {
 			headings.push({
@@ -115,8 +111,7 @@ function subtreeRange(headings, startIndex) {
 /** 主流程：在编辑器上执行一次提升或降低。 */
 function runShift(editor, action) {
 	const text = editor.getValue();
-	// 注意：getCursor("head") 取光标实际位置（选区末端），不是选区起点
-	// 如果误用 getCursor("from")，用户从上方选中文本时会操作上面的标题
+	// 取光标实际位置（head = 选区末端，即光标闪烁的位置）
 	const cursorLine = editor.getCursor("head").line;
 
 	const { headings } = scan(text);
@@ -135,7 +130,7 @@ function runShift(editor, action) {
 		let newLine;
 
 		if (action === "promote") {
-			if (h.level === 1) {
+			if (h.level <= 1) {
 				// H1 提升 → 去掉 # 和后面的一个空格，退为普通段落
 				const afterHash = oldLine.slice(h.hashStart + 1);
 				newLine = afterHash.replace(/^ /, "");
@@ -164,11 +159,9 @@ function runShift(editor, action) {
 
 	if (changes.length === 0) return;
 
-	// 保存当前光标和滚动位置，替换后恢复。
-	const savedCursor = editor.getCursor();
+	// 同时保留滚动位置（不设置光标位置，让 CM 自然地映射光标到新位置）
 	const savedScroll = editor.getScrollInfo();
 	editor.transaction({ changes });
-	editor.setCursor(savedCursor);
 	editor.scrollTo(savedScroll.left, savedScroll.top);
 }
 
