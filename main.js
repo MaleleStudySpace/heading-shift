@@ -20,28 +20,29 @@
 
 const { Plugin, MarkdownView } = require("obsidian");
 
-/** 正则：匹配一行 ATX 标题，捕获前导 # 数量。允许 1~6 个 #，# 后不限定必须空格。 */
-const HEADING_RE = /^( {0,3})(#{1,6})([ \t].*|$)/;
+/** 正则：匹配一行 ATX 标题，捕获前导空白和 # 数量。
+ *  前导空白支持空格和 tab（匹配任意数量，与 Obsidian 实际渲染一致）。
+ *  #只能 1~6 个，其后至少跟一个空格/tab 或直接行尾，避免 7+ 个 # 误匹配。
+ *  注意：不能在 scan() 中替换 tab → 空格，否则 hashStart 偏移量会与原始行不匹配。 */
+const HEADING_RE = /^([ \t]*)(#{1,6})([ \t].*|$)/;
 
 /**
  * 扫描全文，返回所有标题与代码块围栏的位置信息。
  * @param {string} text 全文
- * @returns {{ headings: {line:number, level:number, hashStart:number}[], fenced: {line:number, on:boolean, fenceChar:string}[] }}
+ * @returns {{ headings: {line:number, level:number, hashStart:number}[] }}
  */
 function scan(text) {
 	const lines = text.split("\n");
 	const headings = [];
-	const fenced = []; // 每行是否处于代码块内（true=代码块内）
 	let inFence = false;
 	let fenceChar = "";
 
 	for (let i = 0; i < lines.length; i++) {
 		const raw = lines[i];
-		const line = raw.replace(/^\t+/, "    "); // tab → 4 空格，便于判断缩进
-		const trimmed = line.trimStart();
 
 		// 代码块围栏判定：``` 或 ~~~（>=3 个相同字符，允许尾部空格）
-		const fenceMatch = trimmed.match(/^(`{3,}|~{3,})/);
+		// 直接对原始行 trimStart，不替换 tab，避免影响后续缩进感知
+		const fenceMatch = raw.trimStart().match(/^(`{3,}|~{3,})/);
 		if (fenceMatch) {
 			const fc = fenceMatch[1][0];
 			if (!inFence) {
@@ -51,16 +52,16 @@ function scan(text) {
 				inFence = false;
 				fenceChar = "";
 			}
-			fenced.push(true); // 围栏行本身算作「代码块上下文」，内部不解析标题
+			// 围栏行本身算作「代码块上下文」，内部不解析标题
 			continue;
 		}
 
 		if (inFence) {
-			fenced.push(true);
 			continue;
 		}
 
-		const m = line.match(HEADING_RE);
+		// 直接对原始行匹配标题，保证 hashStart 与原始行字符偏移一致
+		const m = raw.match(HEADING_RE);
 		if (m) {
 			headings.push({
 				line: i,
@@ -68,10 +69,9 @@ function scan(text) {
 				hashStart: m[1].length, // 行内 # 的起始列（用于精确替换）
 			});
 		}
-		fenced.push(false);
 	}
 
-	return { headings, fenced };
+	return { headings };
 }
 
 /**
@@ -115,9 +115,11 @@ function subtreeRange(headings, startIndex) {
 /** 主流程：在编辑器上执行一次提升或降低。 */
 function runShift(editor, action) {
 	const text = editor.getValue();
-	const cursorLine = editor.getCursor("from").line;
+	// 注意：getCursor("head") 取光标实际位置（选区末端），不是选区起点
+	// 如果误用 getCursor("from")，用户从上方选中文本时会操作上面的标题
+	const cursorLine = editor.getCursor("head").line;
 
-	const { headings, fenced } = scan(text);
+	const { headings } = scan(text);
 	if (headings.length === 0) return;
 
 	const cur = findCurrentHeading(headings, cursorLine);
@@ -133,7 +135,8 @@ function runShift(editor, action) {
 		let newLine;
 
 		if (action === "promote") {
-			if (h.level <= 1) {
+			if (h.level === 1) {
+				// H1 提升 → 去掉 # 和后面的一个空格，退为普通段落
 				const afterHash = oldLine.slice(h.hashStart + 1);
 				newLine = afterHash.replace(/^ /, "");
 			} else {
@@ -173,7 +176,7 @@ class HeadingShiftPlugin extends Plugin {
 	onload() {
 		const promoteCmd = this.addCommand({
 			id: "heading-promote",
-			name: "Promote heading (with sub-headings)",
+			name: "提升标题一级（含所有子标题）",
 			icon: "arrow-up",
 			// 默认快捷键：Ctrl+Shift+=  (即 Ctrl+Shift++)
 			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "=" }],
@@ -189,7 +192,7 @@ class HeadingShiftPlugin extends Plugin {
 
 		const demoteCmd = this.addCommand({
 			id: "heading-demote",
-			name: "Demote heading (with sub-headings)",
+			name: "降低标题一级（含所有子标题）",
 			icon: "arrow-down",
 			// 默认快捷键：Ctrl+Shift+-
 			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "-" }],
