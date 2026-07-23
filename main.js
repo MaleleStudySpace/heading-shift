@@ -116,8 +116,9 @@ function subtreeRange(headings, startIndex) {
 /** 主流程：在编辑器上执行一次提升或降低。 */
 function runShift(editor, action) {
 	const text = editor.getValue();
-	// 取光标实际位置（head = 选区末端，即光标闪烁的位置）
-	const cursorLine = editor.getCursor("head").line;
+	// 取光标实际位置（使用默认 getCursor() 而不是 getCursor("head")，
+	// 因为 Obsidian CM6 包装层对 "head" 参数的处理可能不稳定）
+	const cursorLine = editor.getCursor().line;
 
 	const { headings } = scan(text);
 	if (headings.length === 0) return;
